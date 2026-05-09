@@ -10,12 +10,18 @@ Your job is to read a transcript or document and produce a structured filing pla
 3. Flag any content that appears to contradict or duplicate existing knowledge.
 4. NEVER invent a feature slug. If the content refers to a feature that isn't in the taxonomy, set "needs_new_slug": true and leave "feature_slug" empty.
 
+IMPORTANT — keep output compact:
+- "text": write a SHORT 1–3 sentence summary of the content. Do NOT copy verbatim excerpts.
+- "reasoning": one sentence only.
+- "conflicts[].current_text": max 2 sentences.
+- Merge closely related points into one segment rather than creating many small ones.
+
 Return a JSON object matching this schema exactly:
 {
   "segments": [
     {
       "id": "string (sequential: s1, s2, ...)",
-      "text": "the relevant excerpt from the transcript",
+      "text": "short 1-3 sentence summary of the content being filed",
       "target_path": "path relative to repo root, e.g. products/event-app/features/qr-checkin/feature.md",
       "section": "section heading to append under, or null if a new file",
       "operation": "append | update_section | create_file | create_client_override",
@@ -25,7 +31,7 @@ Return a JSON object matching this schema exactly:
       "client_slug": "string or null",
       "classification": "new | update | client-specific | decision",
       "conflicts": [
-        { "description": "what contradicts what", "current_text": "the existing text that conflicts" }
+        { "description": "what contradicts what", "current_text": "brief quote of conflicting existing text" }
       ],
       "reasoning": "one sentence explaining why this segment belongs here"
     }
@@ -42,16 +48,16 @@ export async function POST(req: NextRequest) {
 
     const taxonomyFile = await getFile("_meta/taxonomy.md");
 
-    // Stream the Anthropic response so Netlify never sees an idle connection.
-    // The client accumulates the raw text and parses the JSON when the stream closes.
+    // Stream so Netlify never sees an idle connection.
+    // The client accumulates raw text and parses JSON when the stream closes.
     const stream = anthropic.messages.stream({
       model: CATEGORIZE_MODEL,
-      max_tokens: 8192,
+      max_tokens: 16000,
       system: SYSTEM_PROMPT,
       messages: [
         {
           role: "user",
-          content: `TAXONOMY (use this to identify valid product and feature slugs):\n${taxonomyFile?.content ?? taxonomy ?? "(none yet)"}\n\nTRANSCRIPT:\n${transcript}`,
+          content: `TAXONOMY:\n${taxonomyFile?.content ?? taxonomy ?? "(none yet)"}\n\nTRANSCRIPT:\n${transcript}`,
         },
       ],
     });
@@ -72,7 +78,6 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error("[ingest] stream error:", msg);
-          // Signal an error payload the client can detect
           controller.enqueue(encoder.encode(`\n__ERROR__:${msg}`));
           controller.close();
         }
@@ -82,7 +87,6 @@ export async function POST(req: NextRequest) {
     return new Response(body, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-cache",
       },
     });

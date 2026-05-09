@@ -4,6 +4,32 @@ import { useState } from "react";
 import Link from "next/link";
 import type { Segment } from "@/lib/markdown";
 
+// Close any unclosed JSON arrays/objects caused by a max_tokens truncation.
+function repairJson(raw: string): string {
+  let s = raw.trimEnd();
+  if (s.endsWith(",")) s = s.slice(0, -1);
+
+  let braces = 0;
+  let brackets = 0;
+  let inString = false;
+  let escape = false;
+
+  for (const ch of s) {
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") braces++;
+    else if (ch === "}") braces--;
+    else if (ch === "[") brackets++;
+    else if (ch === "]") brackets--;
+  }
+
+  for (let i = 0; i < brackets; i++) s += "]";
+  for (let i = 0; i < braces; i++) s += "}";
+  return s;
+}
+
 type Step = "input" | "loading" | "review" | "committing" | "done";
 type Override = {
   conflict_resolution?: "update" | "client-specific" | "cancel";
@@ -92,7 +118,7 @@ export default function IngestPage() {
 
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("AI returned no structured plan. Try a shorter or more focused transcript.");
-      const plan = JSON.parse(jsonMatch[0]);
+      const plan = JSON.parse(repairJson(jsonMatch[0]));
       setSegments(plan.segments ?? []);
       setOverrides({});
       setStep("review");
