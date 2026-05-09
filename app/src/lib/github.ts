@@ -44,3 +44,29 @@ export async function listDirectory(path: string): Promise<string[]> {
     return [];
   }
 }
+
+export async function commitMultipleFiles(
+  files: { path: string; content: string }[],
+  message: string
+) {
+  const { data: ref } = await octokit.git.getRef({ owner, repo, ref: `heads/${branch}` });
+  const latestSha = ref.object.sha;
+
+  const { data: latestCommit } = await octokit.git.getCommit({ owner, repo, commit_sha: latestSha });
+  const baseTreeSha = latestCommit.tree.sha;
+
+  const treeItems = await Promise.all(
+    files.map(async (f) => {
+      const { data: blob } = await octokit.git.createBlob({
+        owner, repo,
+        content: Buffer.from(f.content).toString("base64"),
+        encoding: "base64",
+      });
+      return { path: f.path, mode: "100644" as const, type: "blob" as const, sha: blob.sha };
+    })
+  );
+
+  const { data: newTree } = await octokit.git.createTree({ owner, repo, base_tree: baseTreeSha, tree: treeItems });
+  const { data: newCommit } = await octokit.git.createCommit({ owner, repo, message, tree: newTree.sha, parents: [latestSha] });
+  await octokit.git.updateRef({ owner, repo, ref: `heads/${branch}`, sha: newCommit.sha });
+}

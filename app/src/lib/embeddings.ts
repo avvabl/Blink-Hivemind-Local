@@ -1,11 +1,9 @@
-import VoyageAI from "voyageai";
 import { supabase } from "./supabase";
-
-const voyage = new VoyageAI({ apiKey: process.env.VOYAGE_API_KEY });
 
 const EMBED_MODEL = "voyage-3-large";
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 100;
+const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 
 function chunkText(text: string): string[] {
   const chunks: string[] = [];
@@ -17,9 +15,23 @@ function chunkText(text: string): string[] {
   return chunks;
 }
 
+async function fetchEmbeddings(inputs: string[]): Promise<number[][]> {
+  const res = await fetch(VOYAGE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.VOYAGE_API_KEY}`,
+    },
+    body: JSON.stringify({ input: inputs, model: EMBED_MODEL }),
+  });
+  if (!res.ok) throw new Error(`Voyage API error: ${res.status}`);
+  const json = await res.json() as { data: { embedding: number[]; index: number }[] };
+  return json.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
+}
+
 export async function embedAndStore(filePath: string, content: string) {
   const chunks = chunkText(content);
-  const { embeddings } = await voyage.embed({ input: chunks, model: EMBED_MODEL });
+  const embeddings = await fetchEmbeddings(chunks);
 
   await supabase.from("embeddings").delete().eq("file_path", filePath);
 
@@ -34,9 +46,11 @@ export async function embedAndStore(filePath: string, content: string) {
   await supabase.from("embeddings").insert(rows);
 }
 
-export async function searchSimilar(query: string, limit = 12): Promise<{ file_path: string; content: string; similarity: number }[]> {
-  const { embeddings } = await voyage.embed({ input: [query], model: EMBED_MODEL });
-  const queryEmbedding = embeddings[0];
+export async function searchSimilar(
+  query: string,
+  limit = 12
+): Promise<{ file_path: string; content: string; similarity: number }[]> {
+  const [queryEmbedding] = await fetchEmbeddings([query]);
 
   const { data } = await supabase.rpc("match_embeddings", {
     query_embedding: queryEmbedding,
