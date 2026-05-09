@@ -33,33 +33,41 @@ Return a JSON object matching this schema exactly:
 }`;
 
 export async function POST(req: NextRequest) {
-  const { transcript, taxonomy, author } = await req.json();
-
-  if (!transcript || !author) {
-    return NextResponse.json({ error: "transcript and author are required" }, { status: 400 });
-  }
-
-  const taxonomyFile = await getFile("_meta/taxonomy.md");
-
-  const message = await anthropic.messages.create({
-    model: CATEGORIZE_MODEL,
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `TAXONOMY (use this to identify valid product and feature slugs):\n${taxonomyFile?.content ?? taxonomy ?? "(none yet)"}\n\nTRANSCRIPT:\n${transcript}`,
-      },
-    ],
-  });
-
-  const raw = message.content[0].type === "text" ? message.content[0].text : "";
-
   try {
+    const body = await req.json();
+    const { transcript, taxonomy, author } = body;
+
+    if (!transcript || !author) {
+      return NextResponse.json({ error: "transcript and author are required" }, { status: 400 });
+    }
+
+    const taxonomyFile = await getFile("_meta/taxonomy.md");
+
+    const message = await anthropic.messages.create({
+      model: CATEGORIZE_MODEL,
+      max_tokens: 8192,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `TAXONOMY (use this to identify valid product and feature slugs):\n${taxonomyFile?.content ?? taxonomy ?? "(none yet)"}\n\nTRANSCRIPT:\n${transcript}`,
+        },
+      ],
+    });
+
+    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    const plan = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    if (!jsonMatch) {
+      return NextResponse.json({ error: "LLM returned no JSON", raw }, { status: 500 });
+    }
+
+    const plan = JSON.parse(jsonMatch[0]);
     return NextResponse.json({ plan, author });
-  } catch {
-    return NextResponse.json({ error: "Failed to parse LLM response", raw }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error("[ingest] error:", message, stack);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
