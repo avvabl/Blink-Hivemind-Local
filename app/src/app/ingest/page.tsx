@@ -4,30 +4,82 @@ import { useState } from "react";
 import Link from "next/link";
 import type { Segment } from "@/lib/markdown";
 
-// Close any unclosed JSON arrays/objects caused by a max_tokens truncation.
-function repairJson(raw: string): string {
-  let s = raw.trimEnd();
-  if (s.endsWith(",")) s = s.slice(0, -1);
+// ── JSON recovery helpers ─────────────────────────────────────────────────
+// Streaming from the LLM can be truncated at the token limit, leaving broken
+// JSON. We try three strategies in order before giving up.
 
-  let braces = 0;
-  let brackets = 0;
-  let inString = false;
-  let escape = false;
-
+function scanNesting(s: string) {
+  let inString = false, escape = false, braces = 0, brackets = 0;
   for (const ch of s) {
-    if (escape) { escape = false; continue; }
-    if (ch === "\\") { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === "{") braces++;
+    if (escape)        { escape = false; continue; }
+    if (ch === "\\")   { escape = true;  continue; }
+    if (ch === '"')    { inString = !inString; continue; }
+    if (inString)      continue;
+    if (ch === "{")    braces++;
     else if (ch === "}") braces--;
     else if (ch === "[") brackets++;
     else if (ch === "]") brackets--;
   }
+  return { inString, braces, brackets };
+}
 
+// Tier 2: close unclosed strings/brackets/braces.
+function repairJson(raw: string): string {
+  let s = raw.trimEnd().replace(/,\s*$/, "");
+  const { inString, braces, brackets } = scanNesting(s);
+  if (inString) s += '"';      // close the unclosed string value
+  s = s.trimEnd().replace(/,\s*$/, "");   // trailing comma after string close
   for (let i = 0; i < brackets; i++) s += "]";
   for (let i = 0; i < braces; i++) s += "}";
   return s;
+}
+
+// Tier 3: pull out every complete {...} segment object regardless of outer structure.
+function extractSegments(raw: string): Segment[] {
+  const results: Segment[] = [];
+  const match = raw.match(/"segments"\s*:\s*\[/);
+  if (!match || match.index == null) return results;
+  const content = raw.slice(match.index + match[0].length);
+
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (esc)          { esc = false; continue; }
+    if (ch === "\\")  { esc = true;  continue; }
+    if (ch === '"')   { inStr = !inStr; continue; }
+    if (inStr)        continue;
+    if (ch === "{")   { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        try {
+          const obj = JSON.parse(content.slice(start, i + 1)) as Segment;
+          if (obj.id) results.push(obj);
+        } catch { /* incomplete object, skip */ }
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+
+// Try all three strategies; return a plan or throw.
+function parsePlan(raw: string): { segments: Segment[] } {
+  const start = raw.indexOf("{");
+  if (start === -1) throw new Error("No JSON found in AI response.");
+  const json = raw.slice(start);
+
+  // Tier 1: direct
+  try { return JSON.parse(json); } catch { /* fall through */ }
+
+  // Tier 2: structural repair
+  try { return JSON.parse(repairJson(json)); } catch { /* fall through */ }
+
+  // Tier 3: extract only complete segment objects
+  const segments = extractSegments(raw);
+  if (segments.length > 0) return { segments };
+
+  throw new Error("Could not parse the AI response. The transcript may be too long — try splitting it into shorter sections.");
 }
 
 type Step = "input" | "loading" | "review" | "committing" | "done";
@@ -116,9 +168,7 @@ export default function IngestPage() {
         throw new Error(msg);
       }
 
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("AI returned no structured plan. Try a shorter or more focused transcript.");
-      const plan = JSON.parse(repairJson(jsonMatch[0]));
+      const plan = parsePlan(raw);
       setSegments(plan.segments ?? []);
       setOverrides({});
       setStep("review");
