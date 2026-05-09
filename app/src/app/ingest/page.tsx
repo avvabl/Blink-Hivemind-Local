@@ -11,18 +11,26 @@ type Override = {
   cancelled?: boolean;
 };
 
-const CLASSIFICATION_COLORS: Record<string, string> = {
-  new: "bg-indigo-100 text-indigo-700",
-  update: "bg-amber-100 text-amber-700",
-  "client-specific": "bg-purple-100 text-purple-700",
-  decision: "bg-green-100 text-green-700",
+const CLASSIFICATION_BADGE: Record<string, string> = {
+  new:              "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200",
+  update:           "bg-amber-100 text-amber-800 ring-1 ring-amber-200",
+  "client-specific":"bg-purple-100 text-purple-700 ring-1 ring-purple-200",
+  decision:         "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200",
 };
-const OP_COLORS: Record<string, string> = {
-  append: "bg-slate-100 text-slate-600",
-  update_section: "bg-amber-100 text-amber-600",
-  create_file: "bg-emerald-100 text-emerald-600",
-  create_client_override: "bg-purple-100 text-purple-600",
+const OP_BADGE: Record<string, string> = {
+  append:                "bg-gray-100 text-gray-700 ring-1 ring-gray-200",
+  update_section:        "bg-amber-100 text-amber-700 ring-1 ring-amber-200",
+  create_file:           "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200",
+  create_client_override:"bg-purple-100 text-purple-700 ring-1 ring-purple-200",
 };
+
+function Badge({ label, className }: { label: string; className: string }) {
+  return (
+    <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${className}`}>
+      {label}
+    </span>
+  );
+}
 
 export default function IngestPage() {
   const [step, setStep] = useState<Step>("input");
@@ -87,123 +95,153 @@ export default function IngestPage() {
   }
 
   const active = segments.filter((s) => !overrides[s.id]?.cancelled);
-  const hasUnresolved = active.some(
-    (s) => s.conflicts.length > 0 && !overrides[s.id]?.conflict_resolution
-  );
+  const hasUnresolved = active.some((s) => s.conflicts.length > 0 && !overrides[s.id]?.conflict_resolution);
   const hasMissingSlugs = active.some((s) => s.needs_new_slug && !overrides[s.id]?.assigned_slug);
   const canCommit = active.length > 0 && !hasUnresolved && !hasMissingSlugs;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-slate-900 text-white px-6 py-4 flex items-center gap-4">
-        <Link href="/" className="text-slate-400 hover:text-white text-sm">← Home</Link>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+
+      {/* Header */}
+      <header className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center gap-4">
+        <Link href="/" className="text-zinc-400 hover:text-white text-sm transition-colors shrink-0">
+          ← Home
+        </Link>
+        <div className="w-px h-4 bg-zinc-700" />
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">Add Knowledge</h1>
+          <h1 className="text-white text-sm font-semibold">Add Knowledge</h1>
           {step === "review" && (
-            <p className="text-slate-400 text-xs">{active.length} of {segments.length} segments active</p>
+            <p className="text-zinc-400 text-xs mt-0.5">{active.length} of {segments.length} segments active</p>
           )}
         </div>
       </header>
 
       <div className="flex-1 max-w-3xl w-full mx-auto px-4 py-8">
+
+        {/* Error banner */}
         {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-            {error}
+          <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-200 text-red-800 rounded-xl px-4 py-3 text-sm">
+            <span className="shrink-0 mt-0.5">⚠</span>
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Step 1: Input */}
+        {/* ── Step 1: Input ── */}
         {step === "input" && (
-          <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-7 space-y-6">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Your name</label>
+              <h2 className="text-gray-900 font-semibold text-lg">New ingestion</h2>
+              <p className="text-gray-500 text-sm mt-1">Paste a transcript, notes, or stream of thought. The AI will analyse and file it.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Your name</label>
               <input
                 type="text"
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
                 placeholder="e.g. Awwab"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full bg-white text-gray-900 placeholder-gray-400 border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Transcript or notes</label>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Transcript or notes</label>
               <textarea
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
-                placeholder="Paste your transcript, stream of thoughts, or .md content here…"
+                placeholder={"Paste your transcript, stream of thoughts, or .md content here…\n\nThe AI will split it into segments and propose where each one belongs."}
                 rows={14}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+                className="w-full bg-white text-gray-900 placeholder-gray-400 border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm font-[var(--font-geist-mono)] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y leading-relaxed transition-shadow"
               />
+              {transcript.length > 0 && (
+                <p className="text-xs text-gray-400 text-right">{transcript.length.toLocaleString()} characters</p>
+              )}
             </div>
+
             <button
               onClick={analyze}
               disabled={!author.trim() || !transcript.trim()}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-colors text-sm"
             >
               Analyse →
             </button>
           </div>
         )}
 
-        {/* Loading */}
+        {/* ── Loading ── */}
         {(step === "loading" || step === "committing") && (
-          <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center gap-4">
-            <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-            <p className="text-slate-500 text-sm">
-              {step === "loading" ? "Analysing transcript…" : "Committing to GitHub…"}
-            </p>
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-16 flex flex-col items-center gap-5">
+            <div className="w-9 h-9 border-[3px] border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+            <div className="text-center">
+              <p className="text-gray-800 font-medium text-sm">
+                {step === "loading" ? "Analysing transcript…" : "Committing to GitHub…"}
+              </p>
+              <p className="text-gray-400 text-xs mt-1">
+                {step === "loading" ? "This can take 10–30 seconds for long transcripts." : "Writing files and updating history…"}
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Step 2: Review */}
+        {/* ── Step 2: Review ── */}
         {step === "review" && (
           <div className="space-y-4">
+
+            {/* Toolbar */}
             <div className="flex items-center justify-between">
-              <button onClick={() => setStep("input")} className="text-sm text-slate-500 hover:text-slate-800">← Back</button>
+              <button
+                onClick={() => setStep("input")}
+                className="text-sm text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1"
+              >
+                ← Back to input
+              </button>
               <button
                 onClick={commit}
                 disabled={!canCommit}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
               >
                 Commit {active.length} segment{active.length !== 1 ? "s" : ""} →
               </button>
             </div>
 
-            {!canCommit && !hasUnresolved && !hasMissingSlugs && active.length === 0 && (
-              <p className="text-sm text-slate-400 text-center py-2">All segments cancelled.</p>
-            )}
+            {/* Validation notices */}
             {hasUnresolved && (
-              <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-                Resolve all conflicts before committing.
-              </p>
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-2.5 text-sm">
+                <span>⚠</span> Resolve all conflicts before committing.
+              </div>
             )}
             {hasMissingSlugs && (
-              <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-                Assign a slug to all new features before committing.
-              </p>
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-2.5 text-sm">
+                <span>⚠</span> Assign a slug to all new features before committing.
+              </div>
+            )}
+            {!canCommit && active.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-2">All segments skipped.</p>
             )}
 
+            {/* Segment cards */}
             {segments.map((seg, i) => {
               const ov = overrides[seg.id] ?? {};
               const cancelled = ov.cancelled ?? false;
               return (
                 <div
                   key={seg.id}
-                  className={`bg-white border rounded-xl overflow-hidden transition-opacity ${cancelled ? "opacity-40" : "border-slate-200"}`}
+                  className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all ${
+                    cancelled ? "opacity-40 border-gray-200" : "border-gray-200"
+                  }`}
                 >
                   {/* Card header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
-                    <span className="text-xs text-slate-400 font-mono">Segment {i + 1}</span>
+                  <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100">
+                    <span className="text-xs text-gray-400 font-[var(--font-geist-mono)]">
+                      Segment {i + 1}
+                    </span>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CLASSIFICATION_COLORS[seg.classification] ?? "bg-slate-100 text-slate-600"}`}>
-                        {seg.classification}
-                      </span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${OP_COLORS[seg.operation] ?? "bg-slate-100 text-slate-600"}`}>
-                        {seg.operation.replace("_", " ")}
-                      </span>
+                      <Badge label={seg.classification} className={CLASSIFICATION_BADGE[seg.classification] ?? "bg-gray-100 text-gray-700"} />
+                      <Badge label={seg.operation.replace(/_/g, " ")} className={OP_BADGE[seg.operation] ?? "bg-gray-100 text-gray-700"} />
                       <button
                         onClick={() => patch(seg.id, { cancelled: !cancelled })}
-                        className="text-xs text-slate-400 hover:text-red-500 ml-1"
+                        className="text-xs text-gray-400 hover:text-red-600 ml-1 transition-colors"
                       >
                         {cancelled ? "Restore" : "Skip"}
                       </button>
@@ -211,47 +249,53 @@ export default function IngestPage() {
                   </div>
 
                   {!cancelled && (
-                    <div className="p-4 space-y-3">
+                    <div className="px-5 py-4 space-y-3.5">
                       {/* Excerpt */}
-                      <p className="text-sm text-slate-700 leading-relaxed line-clamp-4">{seg.text}</p>
+                      <p className="text-sm text-gray-800 leading-relaxed line-clamp-4">{seg.text}</p>
 
                       {/* Target path */}
-                      <div className="text-xs font-mono text-slate-500 bg-slate-50 rounded px-3 py-1.5 flex items-center gap-2">
-                        <span className="text-slate-400">→</span>
-                        <span className="break-all">{seg.target_path}</span>
+                      <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                        <span className="text-gray-400 text-xs shrink-0">→</span>
+                        <span className="text-xs font-[var(--font-geist-mono)] text-gray-600 break-all leading-relaxed">
+                          {seg.target_path}
+                        </span>
                       </div>
 
                       {/* New slug input */}
                       {seg.needs_new_slug && (
-                        <div>
-                          <label className="block text-xs font-medium text-amber-700 mb-1">
-                            New feature slug required
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-semibold text-amber-700">
+                            Feature slug required
                           </label>
                           <input
                             type="text"
                             value={ov.assigned_slug ?? ""}
                             onChange={(e) => patch(seg.id, { assigned_slug: e.target.value })}
                             placeholder="e.g. qr-checkin"
-                            className="w-full border border-amber-300 bg-amber-50 rounded px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            className="w-full bg-amber-50 text-gray-900 placeholder-amber-400 border border-amber-300 rounded-lg px-3 py-2 text-xs font-[var(--font-geist-mono)] focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                         </div>
                       )}
 
-                      {/* Conflicts */}
+                      {/* Conflict block */}
                       {seg.conflicts.length > 0 && (
-                        <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
-                          <p className="text-xs font-semibold text-amber-700">⚠ Conflict detected</p>
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                          <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                            <span>⚠</span> Conflict detected
+                          </p>
                           {seg.conflicts.map((c, ci) => (
-                            <div key={ci} className="text-xs text-amber-800">
-                              <p className="mb-1">{c.description}</p>
+                            <div key={ci} className="space-y-1.5">
+                              <p className="text-xs text-amber-900">{c.description}</p>
                               {c.current_text && (
-                                <pre className="bg-white border border-amber-200 rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{c.current_text}</pre>
+                                <pre className="bg-white border border-amber-200 rounded-lg p-2.5 text-xs font-[var(--font-geist-mono)] text-gray-700 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                                  {c.current_text}
+                                </pre>
                               )}
                             </div>
                           ))}
-                          <div className="flex gap-3 pt-1">
+                          <div className="flex gap-4 pt-1">
                             {(["update", "client-specific", "cancel"] as const).map((opt) => (
-                              <label key={opt} className="flex items-center gap-1.5 cursor-pointer">
+                              <label key={opt} className="flex items-center gap-2 cursor-pointer">
                                 <input
                                   type="radio"
                                   name={`conflict-${seg.id}`}
@@ -260,23 +304,27 @@ export default function IngestPage() {
                                   onChange={() => patch(seg.id, { conflict_resolution: opt })}
                                   className="accent-indigo-600"
                                 />
-                                <span className="text-xs text-slate-700 capitalize">{opt.replace("-", " ")}</span>
+                                <span className="text-xs text-gray-800 font-medium capitalize">
+                                  {opt.replace("-", " ")}
+                                </span>
                               </label>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {/* Reasoning accordion */}
+                      {/* Reasoning toggle */}
                       <button
                         onClick={() => toggleExpand(seg.id)}
-                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
+                        className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1.5 transition-colors"
                       >
                         <span>{expanded.has(seg.id) ? "▾" : "▸"}</span>
                         AI reasoning
                       </button>
                       {expanded.has(seg.id) && (
-                        <p className="text-xs text-slate-500 bg-slate-50 rounded px-3 py-2 leading-relaxed">{seg.reasoning}</p>
+                        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3.5 py-2.5 leading-relaxed">
+                          {seg.reasoning}
+                        </p>
                       )}
                     </div>
                   )}
@@ -284,11 +332,12 @@ export default function IngestPage() {
               );
             })}
 
-            <div className="pt-2 flex justify-end">
+            {/* Bottom commit bar */}
+            <div className="pt-2 flex justify-end border-t border-gray-200">
               <button
                 onClick={commit}
                 disabled={!canCommit}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+                className="mt-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-colors"
               >
                 Commit {active.length} segment{active.length !== 1 ? "s" : ""} →
               </button>
@@ -296,23 +345,30 @@ export default function IngestPage() {
           </div>
         )}
 
-        {/* Step 3: Done */}
+        {/* ── Step 3: Done ── */}
         {step === "done" && result && (
-          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-4">
-            <div className="text-4xl">✅</div>
-            <h2 className="text-xl font-semibold text-slate-800">Committed</h2>
-            <p className="text-slate-500 text-sm">
-              {result.fileCount} file{result.fileCount !== 1 ? "s" : ""} updated in the knowledge base.
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-12 text-center space-y-4">
+            <div className="w-14 h-14 bg-emerald-50 rounded-full flex items-center justify-center text-2xl mx-auto">✅</div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Committed</h2>
+              <p className="text-gray-500 text-sm mt-1">
+                {result.fileCount} file{result.fileCount !== 1 ? "s" : ""} updated in the knowledge base.
+              </p>
+            </div>
+            <p className="text-xs font-[var(--font-geist-mono)] text-gray-400 bg-gray-50 rounded-lg px-4 py-2 break-all">
+              {result.transcriptPath}
             </p>
-            <p className="text-xs font-mono text-slate-400">{result.transcriptPath}</p>
             <div className="flex justify-center gap-3 pt-2">
               <button
                 onClick={() => { setStep("input"); setTranscript(""); setSegments([]); setOverrides({}); }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
               >
                 Add more
               </button>
-              <Link href="/" className="border border-slate-200 hover:bg-slate-50 text-slate-600 text-sm font-medium px-5 py-2 rounded-lg">
+              <Link
+                href="/"
+                className="border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+              >
                 Home
               </Link>
             </div>
