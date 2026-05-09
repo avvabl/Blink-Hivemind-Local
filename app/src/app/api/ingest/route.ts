@@ -10,11 +10,11 @@ Your job is to read a transcript or document and produce a structured filing pla
 3. Flag any content that appears to contradict or duplicate existing knowledge.
 4. NEVER invent a feature slug. If the content refers to a feature that isn't in the taxonomy, set "needs_new_slug": true and leave "feature_slug" empty.
 
-IMPORTANT — keep output compact:
-- "text": write a SHORT 1–3 sentence summary of the content. Do NOT copy verbatim excerpts.
+IMPORTANT — granularity and compactness:
+- Create a SEPARATE segment for EACH distinct feature, behavior, configuration option, or business decision. A transcript covering 10 features must produce at least 10 segments. DO NOT merge different topics into one segment.
+- "text": write a SHORT 2–4 sentence summary. Do NOT copy verbatim.
 - "reasoning": one sentence only.
 - "conflicts[].current_text": max 2 sentences.
-- Merge closely related points into one segment rather than creating many small ones.
 
 Return a JSON object matching this schema exactly:
 {

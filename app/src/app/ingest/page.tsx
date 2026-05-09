@@ -87,7 +87,9 @@ type Override = {
   conflict_resolution?: "update" | "client-specific" | "cancel";
   assigned_slug?: string;
   cancelled?: boolean;
+  target_path_override?: string;
 };
+type SplitState = { id: string; textA: string; textB: string };
 
 const CLASSIFICATION_BADGE: Record<string, string> = {
   new:              "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200",
@@ -120,6 +122,9 @@ export default function IngestPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ transcriptPath: string; fileCount: number } | null>(null);
   const [streamedChars, setStreamedChars] = useState(0);
+  const [split, setSplit] = useState<SplitState | null>(null);
+  const [allFiles, setAllFiles] = useState<string[]>([]);
+  const [fileSearch, setFileSearch] = useState<Record<string, string>>({});
 
   function patch(id: string, update: Partial<Override>) {
     setOverrides((prev) => ({ ...prev, [id]: { ...prev[id], ...update } }));
@@ -130,6 +135,27 @@ export default function IngestPage() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  }
+
+  // Lazy-load file list for path search
+  async function ensureFiles() {
+    if (allFiles.length > 0) return;
+    try {
+      const res = await fetch("/api/files");
+      const data = await res.json();
+      if (data.files) setAllFiles(data.files);
+    } catch { /* non-critical */ }
+  }
+
+  // Split a segment into two
+  function confirmSplit() {
+    if (!split) return;
+    const orig = segments.find((s) => s.id === split.id);
+    if (!orig) return;
+    const a: Segment = { ...orig, id: `${orig.id}a`, text: split.textA };
+    const b: Segment = { ...orig, id: `${orig.id}b`, text: split.textB };
+    setSegments((prev) => prev.flatMap((s) => s.id === split.id ? [a, b] : [s]));
+    setSplit(null);
   }
 
   async function analyze() {
@@ -182,14 +208,22 @@ export default function IngestPage() {
     setStep("committing");
     setError(null);
     try {
-      const confirmed = segments.map((s) => ({ ...s, ...(overrides[s.id] ?? {}) }));
+      const confirmed = segments.map((s) => {
+        const ov = overrides[s.id] ?? {};
+        return {
+          ...s,
+          ...ov,
+          // Apply path override as the canonical target_path
+          target_path: ov.target_path_override ?? s.target_path,
+        };
+      });
       const res = await fetch("/api/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ segments: confirmed, author, transcript }),
       });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "Commit failed");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) throw new Error(data?.error || "Commit failed — the function may have timed out");
       setResult(data);
       setStep("done");
     } catch (e: unknown) {
@@ -334,6 +368,13 @@ export default function IngestPage() {
             {segments.map((seg, i) => {
               const ov = overrides[seg.id] ?? {};
               const cancelled = ov.cancelled ?? false;
+              const isSplitting = split?.id === seg.id;
+              const currentPath = ov.target_path_override ?? seg.target_path;
+              const searchQuery = fileSearch[seg.id] ?? "";
+              const fileSuggestions = searchQuery.length > 1
+                ? allFiles.filter((f) => f.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 8)
+                : [];
+
               return (
                 <div
                   key={seg.id}
@@ -349,6 +390,19 @@ export default function IngestPage() {
                     <div className="flex items-center gap-2">
                       <Badge label={seg.classification} className={CLASSIFICATION_BADGE[seg.classification] ?? "bg-gray-100 text-gray-700"} />
                       <Badge label={seg.operation.replace(/_/g, " ")} className={OP_BADGE[seg.operation] ?? "bg-gray-100 text-gray-700"} />
+                      {!cancelled && (
+                        <button
+                          onClick={() => {
+                            const mid = Math.floor(seg.text.length / 2);
+                            const splitAt = seg.text.indexOf(" ", mid);
+                            const point = splitAt > 0 ? splitAt : mid;
+                            setSplit({ id: seg.id, textA: seg.text.slice(0, point).trim(), textB: seg.text.slice(point).trim() });
+                          }}
+                          className="text-xs text-gray-400 hover:text-indigo-600 transition-colors"
+                        >
+                          Split
+                        </button>
+                      )}
                       <button
                         onClick={() => patch(seg.id, { cancelled: !cancelled })}
                         className="text-xs text-gray-400 hover:text-red-600 ml-1 transition-colors"
@@ -360,15 +414,77 @@ export default function IngestPage() {
 
                   {!cancelled && (
                     <div className="px-5 py-4 space-y-3.5">
-                      {/* Excerpt */}
-                      <p className="text-sm text-gray-800 leading-relaxed line-clamp-4">{seg.text}</p>
 
-                      {/* Target path */}
-                      <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                        <span className="text-gray-400 text-xs shrink-0">→</span>
-                        <span className="text-xs font-[var(--font-geist-mono)] text-gray-600 break-all leading-relaxed">
-                          {seg.target_path}
-                        </span>
+                      {/* Split editor */}
+                      {isSplitting ? (
+                        <div className="space-y-3 bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                          <p className="text-xs font-semibold text-indigo-700">Split into two segments — edit each part</p>
+                          <textarea
+                            value={split.textA}
+                            onChange={(e) => setSplit({ ...split, textA: e.target.value })}
+                            rows={3}
+                            className="w-full bg-white text-gray-900 border border-indigo-200 rounded-lg px-3 py-2 text-xs leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          />
+                          <textarea
+                            value={split.textB}
+                            onChange={(e) => setSplit({ ...split, textB: e.target.value })}
+                            rows={3}
+                            className="w-full bg-white text-gray-900 border border-indigo-200 rounded-lg px-3 py-2 text-xs leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={confirmSplit}
+                              disabled={!split.textA.trim() || !split.textB.trim()}
+                              className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+                            >
+                              Confirm split
+                            </button>
+                            <button
+                              onClick={() => setSplit(null)}
+                              className="text-xs text-gray-500 hover:text-gray-800 px-3 py-1.5 border border-gray-200 rounded-lg"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-800 leading-relaxed">{seg.text}</p>
+                      )}
+
+                      {/* Target path with search */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                          <span className="text-gray-400 text-xs shrink-0">→</span>
+                          <span className="text-xs font-[var(--font-geist-mono)] text-gray-600 break-all leading-relaxed flex-1">
+                            {currentPath}
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={searchQuery}
+                            onFocus={ensureFiles}
+                            onChange={(e) => setFileSearch((prev) => ({ ...prev, [seg.id]: e.target.value }))}
+                            placeholder="Search to change target file…"
+                            className="w-full bg-white text-gray-900 placeholder-gray-400 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                          />
+                          {fileSuggestions.length > 0 && (
+                            <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-md mt-1 max-h-48 overflow-y-auto">
+                              {fileSuggestions.map((f) => (
+                                <button
+                                  key={f}
+                                  onClick={() => {
+                                    patch(seg.id, { target_path_override: f });
+                                    setFileSearch((prev) => ({ ...prev, [seg.id]: "" }));
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs font-[var(--font-geist-mono)] text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors truncate"
+                                >
+                                  {f}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* New slug input */}
