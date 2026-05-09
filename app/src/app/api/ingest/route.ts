@@ -34,8 +34,7 @@ Return a JSON object matching this schema exactly:
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { transcript, taxonomy, author } = body;
+    const { transcript, taxonomy, author } = await req.json();
 
     if (!transcript || !author) {
       return NextResponse.json({ error: "transcript and author are required" }, { status: 400 });
@@ -43,7 +42,9 @@ export async function POST(req: NextRequest) {
 
     const taxonomyFile = await getFile("_meta/taxonomy.md");
 
-    const message = await anthropic.messages.create({
+    // Stream the Anthropic response so Netlify never sees an idle connection.
+    // The client accumulates the raw text and parses the JSON when the stream closes.
+    const stream = anthropic.messages.stream({
       model: CATEGORIZE_MODEL,
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
@@ -55,19 +56,39 @@ export async function POST(req: NextRequest) {
       ],
     });
 
-    const raw = message.content[0].type === "text" ? message.content[0].text : "";
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta"
+            ) {
+              controller.enqueue(encoder.encode(event.delta.text));
+            }
+          }
+          controller.close();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[ingest] stream error:", msg);
+          // Signal an error payload the client can detect
+          controller.enqueue(encoder.encode(`\n__ERROR__:${msg}`));
+          controller.close();
+        }
+      },
+    });
 
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json({ error: "LLM returned no JSON", raw }, { status: 500 });
-    }
-
-    const plan = JSON.parse(jsonMatch[0]);
-    return NextResponse.json({ plan, author });
+    return new Response(body, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-cache",
+      },
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
-    console.error("[ingest] error:", message, stack);
+    console.error("[ingest] error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

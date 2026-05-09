@@ -41,6 +41,7 @@ export default function IngestPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ transcriptPath: string; fileCount: number } | null>(null);
+  const [streamedChars, setStreamedChars] = useState(0);
 
   function patch(id: string, update: Partial<Override>) {
     setOverrides((prev) => ({ ...prev, [id]: { ...prev[id], ...update } }));
@@ -56,6 +57,7 @@ export default function IngestPage() {
   async function analyze() {
     if (!author.trim() || !transcript.trim()) return;
     setStep("loading");
+    setStreamedChars(0);
     setError(null);
     try {
       const res = await fetch("/api/ingest", {
@@ -63,9 +65,35 @@ export default function IngestPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript, author }),
       });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "Analysis failed");
-      setSegments(data.plan?.segments ?? []);
+
+      // Non-2xx before streaming starts means a JSON error response
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Analysis failed");
+      }
+
+      // Read the streamed plain-text response
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let raw = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        raw += chunk;
+        setStreamedChars(raw.length);
+      }
+
+      // Check for an in-stream error signal
+      if (raw.includes("__ERROR__:")) {
+        const msg = raw.split("__ERROR__:")[1]?.trim() ?? "Analysis failed";
+        throw new Error(msg);
+      }
+
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("AI returned no structured plan. Try a shorter or more focused transcript.");
+      const plan = JSON.parse(jsonMatch[0]);
+      setSegments(plan.segments ?? []);
       setOverrides({});
       setStep("review");
     } catch (e: unknown) {
@@ -177,9 +205,15 @@ export default function IngestPage() {
               <p className="text-gray-800 font-medium text-sm">
                 {step === "loading" ? "Analysing transcript…" : "Committing to GitHub…"}
               </p>
-              <p className="text-gray-400 text-xs mt-1">
-                {step === "loading" ? "This can take 10–30 seconds for long transcripts." : "Writing files and updating history…"}
-              </p>
+              {step === "loading" && streamedChars > 0 ? (
+                <p className="text-indigo-500 text-xs mt-1 font-[var(--font-geist-mono)]">
+                  {streamedChars.toLocaleString()} characters received…
+                </p>
+              ) : (
+                <p className="text-gray-400 text-xs mt-1">
+                  {step === "loading" ? "Long transcripts can take 30–60 seconds." : "Writing files and updating history…"}
+                </p>
+              )}
             </div>
           </div>
         )}
