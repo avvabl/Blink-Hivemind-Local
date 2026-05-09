@@ -1,0 +1,21 @@
+# App
+app/node_modules/
+app/.next/
+app/.env
+app/.env.local
+app/.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Obsidian workspace (local per-user, not shared)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+
+# Transcripts are committed but large binary attachments are not
+*.mp3
+*.mp4
+*.wav
+*.m4a
